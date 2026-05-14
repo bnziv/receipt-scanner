@@ -79,7 +79,7 @@ export default function ReceiptSplitter() {
   const [isError, setIsError] = useState(false);
 
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
-  const [assignments, setAssignments] = useState<Record<number, string>>({});
+  const [assignments, setAssignments] = useState<Record<number, string[]>>({});
   const [tax, setTax] = useState("");
   const [tip, setTip] = useState("");
   const [payer, setPayer] = useState("");
@@ -116,9 +116,10 @@ export default function ReceiptSplitter() {
   const removePerson = (name: string) => {
     setPeople((p) => p.filter((x) => x !== name));
     setAssignments((prev) => {
-      const next = { ...prev };
-      Object.keys(next).forEach((k) => {
-        if (next[+k] === name) delete next[+k];
+      const next: Record<number, string[]> = {};
+      Object.entries(prev).forEach(([k, assigned]) => {
+        const filtered = assigned.filter((person) => person !== name);
+        if (filtered.length > 0) next[+k] = filtered;
       });
       return next;
     });
@@ -164,8 +165,12 @@ export default function ReceiptSplitter() {
   const personTotals: Record<string, number> = {};
   people.forEach((p) => (personTotals[p] = 0));
   receipt?.items.forEach((item, i) => {
-    const p = assignments[i];
-    if (p && p in personTotals) personTotals[p] += item.price;
+    const assigned = assignments[i] ?? [];
+    if (!assigned.length) return;
+    const share = item.price / assigned.length;
+    assigned.forEach((person) => {
+      if (person in personTotals) personTotals[person] += share;
+    });
   });
 
   const canAnalyze = !!imageBase64 && people.length > 0 && !loading;
@@ -314,8 +319,9 @@ export default function ReceiptSplitter() {
 
             {/* Item rows */}
             {receipt.items.map((item, i) => {
-              const assigned = assignments[i];
-              const c = assigned ? PALETTE[(colorMap[assigned] ?? 0) % PALETTE.length] : null;
+              const assigned = assignments[i] ?? [];
+              const c = assigned.length === 1 ? PALETTE[(colorMap[assigned[0]] ?? 0) % PALETTE.length] : null;
+              const label = assigned.length === 0 ? "Assign" : assigned.length === 1 ? assigned[0] : `Split (${assigned.length})`;
               return (
                 <div
                   key={i}
@@ -331,12 +337,12 @@ export default function ReceiptSplitter() {
                       onClick={() => setOpenDropdown(openDropdown === i ? null : i)}
                       className="text-xs px-2.5 py-1 rounded-full border inline-flex items-center gap-1 transition-colors"
                       style={
-                        assigned && c
+                        assigned.length > 0 && c
                           ? { background: c.bg, borderColor: c.border, color: c.text }
                           : { background: "#f5f4f0", borderColor: "#d4d2c8", color: "#78716c" }
                       }
                     >
-                      {assigned || "Assign"} ▾
+                      {label} ▾
                     </button>
                     {openDropdown === i && (
                       <div className="absolute right-0 top-[calc(100%+4px)] bg-white border border-stone-200 rounded-lg z-10 min-w-[140px] overflow-hidden shadow-sm">
@@ -351,20 +357,36 @@ export default function ReceiptSplitter() {
                         >
                           Unassigned
                         </button>
-                        {people.map((p) => (
-                          <button
-                            key={p}
-                            onClick={() => {
-                              setAssignments((prev) => ({ ...prev, [i]: p }));
-                              setOpenDropdown(null);
-                            }}
-                            className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm border-t border-stone-100 hover:bg-stone-50"
-                            style={assignments[i] === p ? { color: "#1d4ed8", fontWeight: 500 } : { color: "#1a1a18" }}
-                          >
-                            <Avatar name={p} idx={colorMap[p] ?? 0} size={18} />
-                            {p}
-                          </button>
-                        ))}
+                        {people.map((p) => {
+                          const selected = assigned.includes(p);
+                          return (
+                            <button
+                              key={p}
+                              onClick={() => {
+                                setAssignments((prev) => {
+                                  const current = prev[i] ?? [];
+                                  const nextAssigned = current.includes(p)
+                                    ? current.filter((person) => person !== p)
+                                    : [...current, p];
+                                  const next = { ...prev };
+                                  if (nextAssigned.length > 0) next[i] = nextAssigned;
+                                  else delete next[i];
+                                  return next;
+                                });
+                              }}
+                              className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm border-t border-stone-100 hover:bg-stone-50"
+                              style={selected ? { color: "#1d4ed8", fontWeight: 500 } : { color: "#1a1a18" }}
+                            >
+                              <span
+                                className={`inline-flex h-4 w-4 flex-none items-center justify-center rounded border ${selected ? "bg-stone-900 border-stone-900 text-white" : "bg-white border-stone-300 text-transparent"}`}
+                              >
+                                ✓
+                              </span>
+                              <Avatar name={p} idx={colorMap[p] ?? 0} size={18} />
+                              {p}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
